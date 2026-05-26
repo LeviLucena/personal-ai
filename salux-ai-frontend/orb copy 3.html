@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Salux Orb — Protótipo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #03080F;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100vw;
+      height: 100vh;
+    }
+    #orb-container {
+      width: min(620px, 92vmin);
+      height: min(620px, 92vmin);
+    }
+    #label {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(120,180,255,0.30);
+      font: 11px/1 system-ui, sans-serif;
+      letter-spacing: 0.22em;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="orb-container"></div>
+<div id="label">SALUX ORB — PROTÓTIPO</div>
+
+<script type="module">
+import { Mesh, Program, Renderer, Triangle, Vec3 } from 'https://esm.sh/ogl';
+
+/* ── Vertex shader ─────────────────────────────────────── */
+const vert = `
+  precision highp float;
+  attribute vec2 position;
+  attribute vec2 uv;
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position, 0.0, 1.0);
+  }
+`;
+
+/* ── Fragment shader ───────────────────────────────────── */
+const frag = `
+  precision highp float;
+
+  uniform float iTime;
+  uniform vec3  iResolution;
+  uniform float hover;
+  uniform float rot;
+  uniform float hoverIntensity;
+  varying vec2  vUv;
+
+  #define PI  3.14159265358979
+  #define PI2 6.28318530717959
+
+  float hash21(vec2 p) {
+    p = fract(p * vec2(127.34, 311.7));
+    p += dot(p, p + 48.23);
+    return fract(p.x * p.y);
+  }
+
+  float hash11(float p) {
+    return fract(sin(p * 127.1) * 43758.5453);
+  }
+
+  /* ── Pulsing ring ── */
+  float ring(float r, float target, float w, float pulse) {
+    float t2 = target + pulse;
+    return smoothstep(w, 0.0, abs(r - t2)) * (0.7 + 0.3 * sin(iTime * 3.0 + target * 20.0));
+  }
+
+  /* ── Orbital dots ── */
+  float orbitDot(vec2 uv, float radius, float count, float dotR, float speed) {
+    float len     = length(uv);
+    float radDist = abs(len - radius);
+    float angle   = atan(uv.y, uv.x) - iTime * speed;
+    float seg     = PI2 / count;
+    float frac    = mod(angle, seg);
+    float dA      = min(frac, seg - frac);
+    float arcDist = max(len, 0.001) * dA;
+    float d       = sqrt(radDist * radDist + arcDist * arcDist);
+    return smoothstep(dotR, 0.0, d) * step(radDist, dotR * 5.0);
+  }
+
+  /* ── Animated sine wave ── */
+  float sineWave(vec2 uv, float amp, float freq, float phase, float w, float speed) {
+    float y    = amp * sin(uv.x * freq + phase + iTime * speed);
+    float fade = smoothstep(1.4, 0.15, abs(uv.x));
+    return smoothstep(w, 0.0, abs(uv.y - y)) * fade;
+  }
+
+  /* ── Wave dot (moves with wave) ── */
+  float waveDot(vec2 uv, float px, float amp, float freq, float speed, float r) {
+    float py = amp * sin(px * freq + iTime * speed);
+    float twinkle = 0.6 + 0.4 * sin(iTime * 4.0 + px * 7.0);
+    return smoothstep(r, 0.0, length(uv - vec2(px, py))) * twinkle;
+  }
+
+  /* ── Flower of Life ── */
+  float flowerCircle(vec2 p, vec2 center, float radius, float w) {
+    return smoothstep(w, 0.0, abs(length(p - center) - radius));
+  }
+
+  float flowerOfLife(vec2 uv, float rot_) {
+    float r  = 0.092;
+    float w  = 0.004 + 0.002 * sin(iTime * 2.5);
+    float c_ = cos(rot_), s_ = sin(rot_);
+    vec2 p = vec2(c_ * uv.x - s_ * uv.y, s_ * uv.x + c_ * uv.y);
+    float f = flowerCircle(p, vec2(0.0), r, w);
+    for (int i = 0; i < 6; i++) {
+      float a = float(i) * PI / 3.0;
+      f += flowerCircle(p, vec2(cos(a), sin(a)) * r, r, w);
+    }
+    return clamp(f, 0.0, 1.0) * (0.75 + 0.25 * sin(iTime * 2.0));
+  }
+
+  float outerSeed(vec2 uv, float rot_) {
+    float r  = 0.092;
+    float w  = 0.003 + 0.001 * sin(iTime * 3.1);
+    float c_ = cos(-rot_ * 0.7), s_ = sin(-rot_ * 0.7);
+    vec2 p = vec2(c_ * uv.x - s_ * uv.y, s_ * uv.x + c_ * uv.y);
+    float f = 0.0;
+    float dist = r * 1.732;
+    for (int i = 0; i < 6; i++) {
+      float a = float(i) * PI / 3.0 + PI / 6.0;
+      f += flowerCircle(p, vec2(cos(a), sin(a)) * dist, r, w);
+    }
+    return clamp(f, 0.0, 1.0) * (0.6 + 0.4 * sin(iTime * 1.8 + 1.0));
+  }
+
+  /* ── Radial corona rays ── */
+  float coronaRays(vec2 uv, float numRays, float speed) {
+    float angle = atan(uv.y, uv.x) + iTime * speed;
+    float ray   = pow(max(0.0, sin(angle * numRays + iTime * speed * 2.0)), 6.0);
+    return ray * exp(-length(uv) * 4.5);
+  }
+
+  /* ── Moving star field ── */
+  float sparkle(vec2 uv, float seed) {
+    vec2 drift = vec2(sin(iTime * 0.18 + seed) * 0.12, cos(iTime * 0.14 + seed) * 0.09);
+    vec2 g     = floor((uv + drift) * 36.0);
+    vec2 local = fract((uv + drift) * 36.0) - 0.5;
+    float h    = hash21(g + seed);
+    if (h > 0.13) return 0.0;
+    float twinkle = 0.3 + 0.7 * abs(sin(iTime * (2.0 + h * 6.0) + h * PI2));
+    return smoothstep(0.24, 0.0, length(local)) * twinkle;
+  }
+
+  /* ── Flying particle streaks ── */
+  float particle(vec2 uv, float idx) {
+    float h1 = hash11(idx);
+    float h2 = hash11(idx + 7.3);
+    float h3 = hash11(idx + 13.7);
+    float speed2 = 0.4 + h3 * 0.8;
+    float angle = h1 * PI2 + iTime * speed2;
+    float orbit = 0.25 + h2 * 0.55;
+    vec2  pos   = vec2(cos(angle), sin(angle)) * orbit;
+    float trail = 0.0;
+    for (int j = 0; j < 5; j++) {
+      float back = float(j) * 0.04;
+      float pa   = angle - back * speed2;
+      vec2  tp   = vec2(cos(pa), sin(pa)) * orbit;
+      float fade = 1.0 - float(j) * 0.22;
+      trail += smoothstep(0.012 + float(j) * 0.004, 0.0, length(uv - tp)) * fade;
+    }
+    return trail;
+  }
+
+  /* ── Main ── */
+  void main() {
+    vec2 fragCoord = vUv * iResolution.xy;
+    vec2 center    = iResolution.xy * 0.5;
+    float size     = min(iResolution.x, iResolution.y);
+
+    vec2 uvRaw = (fragCoord - center) / size * 2.0;
+    vec2 uv    = uvRaw;
+    float cs = cos(rot), ss = sin(rot);
+    uv = vec2(cs * uv.x - ss * uv.y, ss * uv.x + cs * uv.y);
+    uv.x += hover * hoverIntensity * 0.1 * sin(uv.y * 10.0 + iTime);
+    uv.y += hover * hoverIntensity * 0.1 * sin(uv.x * 10.0 + iTime);
+
+    float r = length(uv);
+    float t = iTime;
+
+    /* Vivid palette */
+    vec3 GOLD        = vec3(1.00, 0.72, 0.10);
+    vec3 GOLD_BRIGHT = vec3(1.00, 0.95, 0.55);
+    vec3 CYAN        = vec3(0.00, 0.85, 1.00);
+    vec3 BLUE        = vec3(0.10, 0.50, 1.00);
+    vec3 BLUE_BRIGHT = vec3(0.40, 0.88, 1.00);
+    vec3 WHITE       = vec3(1.00, 1.00, 1.00);
+
+    /* Base */
+    vec3 col = vec3(0.015, 0.035, 0.10);
+
+    /* Outer electric aura — pulsing */
+    float pulse = 0.85 + 0.15 * sin(t * 2.2);
+    col += CYAN * exp(-r * 2.2) * 0.55 * pulse;
+    col += BLUE * exp(-r * 4.0) * 0.30 * pulse;
+
+    /* Moving star fields (3 layers, different drift) */
+    col += WHITE       * sparkle(uvRaw, 0.0)  * 0.80;
+    col += GOLD_BRIGHT * sparkle(uvRaw, 3.7)  * 0.55;
+    col += CYAN        * sparkle(uvRaw, 8.1)  * 0.45;
+    col += BLUE_BRIGHT * sparkle(uvRaw, 15.3) * 0.35;
+
+    /* Corona rays (6 + 12 blades) */
+    col += GOLD   * coronaRays(uv,  6.0,  0.18) * 2.2;
+    col += CYAN   * coronaRays(uv, 12.0, -0.12) * 1.2;
+    col += GOLD_BRIGHT * coronaRays(uv, 3.0, 0.25) * 1.5;
+
+    /* Flower of Life — pulsing golden mandala */
+    float fol     = flowerOfLife(uv, t * 0.14);
+    float folOut  = outerSeed   (uv, t * 0.14);
+    float folMask = smoothstep(0.34, 0.10, r);
+    col += GOLD_BRIGHT * fol   * 1.20 * folMask;
+    col += GOLD        * folOut * 0.70 * folMask;
+
+    /* Concentric rings — pulsing */
+    float pr = 0.004 * sin(t * 3.5);
+    col += CYAN * ring(r, 0.155, 0.003, pr * 0.8) * 1.00;
+    col += BLUE * ring(r, 0.228, 0.003, pr * 0.9) * 0.90;
+    col += CYAN * ring(r, 0.306, 0.003, pr * 1.0) * 0.80;
+    col += BLUE * ring(r, 0.388, 0.003, pr * 1.1) * 0.68;
+    col += CYAN * ring(r, 0.472, 0.003, pr * 1.2) * 0.55;
+    col += BLUE * ring(r, 0.558, 0.003, pr * 1.3) * 0.42;
+    col += CYAN * ring(r, 0.645, 0.003, pr * 1.4) * 0.30;
+
+    /* Orbital dots — 3 rings */
+    col += BLUE_BRIGHT * orbitDot(uv, 0.306, 32.0, 0.010,  0.40);
+    col += CYAN        * orbitDot(uv, 0.430, 50.0, 0.009, -0.30);
+    col += GOLD_BRIGHT * orbitDot(uv, 0.558, 68.0, 0.008,  0.22);
+
+    /* Flying particle trails (8 particles) */
+    for (int i = 0; i < 8; i++) {
+      float h = hash11(float(i) * 3.71);
+      vec3  pc = mix(CYAN, GOLD_BRIGHT, step(0.5, h));
+      col += pc * particle(uv, float(i)) * 0.9;
+    }
+
+    /* Sine waves — faster, more vivid */
+    col += GOLD        * sineWave(uv, 0.145, 7.8, 0.0,      0.0055, 2.2) * 1.20;
+    col += CYAN        * sineWave(uv, 0.185, 6.6, PI,        0.0045, 2.8) * 0.95;
+    col += BLUE_BRIGHT * sineWave(uv, 0.090, 11.0, PI*0.5,  0.0035, 3.5) * 0.70;
+    col += GOLD_BRIGHT * sineWave(uv, 0.065, 14.0, PI*1.5,  0.0028, 4.0) * 0.50;
+
+    /* Gold wave particles — animated */
+    float ga = 0.145, gf = 7.8, gs = 2.2;
+    col += GOLD_BRIGHT * waveDot(uv, -0.85, ga, gf, gs, 0.016);
+    col += GOLD_BRIGHT * waveDot(uv, -0.58, ga, gf, gs, 0.014);
+    col += GOLD_BRIGHT * waveDot(uv, -0.30, ga, gf, gs, 0.014);
+    col += GOLD_BRIGHT * waveDot(uv,  0.00, ga, gf, gs, 0.016);
+    col += GOLD_BRIGHT * waveDot(uv,  0.30, ga, gf, gs, 0.014);
+    col += GOLD_BRIGHT * waveDot(uv,  0.58, ga, gf, gs, 0.014);
+    col += GOLD_BRIGHT * waveDot(uv,  0.85, ga, gf, gs, 0.016);
+
+    /* Explosive golden core */
+    col += GOLD        * exp(-r *  9.0) * 4.0;
+    col += GOLD_BRIGHT * exp(-r * 22.0) * 5.0;
+    col += WHITE       * exp(-r * 55.0) * 7.0;
+
+    /* Tone map — more contrast/punch */
+    col  = col / (col + vec3(0.55));
+    col  = pow(clamp(col, 0.0, 1.0), vec3(0.82));
+
+    float a = max(max(col.r, col.g), col.b);
+    gl_FragColor = vec4(col * a, a);
+  }
+`;
+
+/* ── OGL setup ─────────────────────────────────────────── */
+const container = document.getElementById('orb-container');
+
+const renderer = new Renderer({ alpha: true, premultipliedAlpha: false });
+const gl       = renderer.gl;
+gl.clearColor(0, 0, 0, 0);
+container.appendChild(gl.canvas);
+
+const geometry = new Triangle(gl);
+const program  = new Program(gl, {
+  vertex:   vert,
+  fragment: frag,
+  uniforms: {
+    iTime:          { value: 0 },
+    iResolution:    { value: new Vec3(gl.canvas.width, gl.canvas.height, 1) },
+    hover:          { value: 0 },
+    rot:            { value: 0 },
+    hoverIntensity: { value: 0.2 },
+  },
+});
+
+const mesh = new Mesh(gl, { geometry, program });
+
+/* ── Resize ─────────────────────────────────────────────── */
+function resize() {
+  const dpr    = window.devicePixelRatio || 1;
+  const w      = container.clientWidth;
+  const h      = container.clientHeight;
+  renderer.setSize(w * dpr, h * dpr);
+  gl.canvas.style.width  = w + 'px';
+  gl.canvas.style.height = h + 'px';
+  program.uniforms.iResolution.value.set(gl.canvas.width, gl.canvas.height, 1);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ── Hover ──────────────────────────────────────────────── */
+let targetHover = 0;
+container.addEventListener('mousemove', (e) => {
+  const rect = container.getBoundingClientRect();
+  const size = Math.min(rect.width, rect.height);
+  const uvX  = ((e.clientX - rect.left  - rect.width  / 2) / size) * 2;
+  const uvY  = ((e.clientY - rect.top   - rect.height / 2) / size) * 2;
+  targetHover = Math.sqrt(uvX * uvX + uvY * uvY) < 0.9 ? 1 : 0;
+});
+container.addEventListener('mouseleave', () => { targetHover = 0; });
+
+/* ── Render loop ────────────────────────────────────────── */
+let lastTime   = 0;
+let currentRot = 0;
+
+(function loop(t) {
+  requestAnimationFrame(loop);
+  const dt = (t - lastTime) * 0.001;
+  lastTime = t;
+
+  program.uniforms.iTime.value = t * 0.001;
+  program.uniforms.hover.value += (targetHover - program.uniforms.hover.value) * 0.1;
+
+  if (program.uniforms.hover.value > 0.5) currentRot += dt * 0.3;
+  program.uniforms.rot.value = currentRot;
+
+  renderer.render({ scene: mesh });
+})(0);
+</script>
+</body>
+</html>
