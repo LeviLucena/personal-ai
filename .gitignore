@@ -2,3 +2,7 @@
 .env
 !.env.example
 !.env.sample
+
+# Generated PDFs
+*.pdf
+

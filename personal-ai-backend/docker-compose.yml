@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: personalai
+      POSTGRES_PASSWORD: personalai_secret
+      POSTGRES_DB: personalai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U personalai -d personalai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://personalai:personalai_secret@db:5432/personalai
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: gpt-4o
+      HOST: 0.0.0.0
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: >
+      sh -c "python -m src.db.init_schema
+      && python -m src.db.seed --url postgresql://personalai:personalai_secret@db:5432/personalai --skip-if-seeded
+      && uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  frontend:
+    build: ../personal-ai-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../personal-ai-frontend:/app
+      - /app/node_modules
+
+volumes:
+  pgdata:
