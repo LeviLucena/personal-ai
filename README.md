@@ -4,6 +4,53 @@
 
 AI-powered hospital management platform. Replaces 14 n8n workflows with Python agents (LangChain/LangGraph + GPT-4o) and a modern React frontend with voice interaction and digital avatar.
 
+## Clinical Copilot with Digital Avatar
+
+Voice-powered hospital assistant with a **3D digital avatar** (Simli) and **speech synthesis** (OpenAI TTS). Healthcare professionals ask clinical questions by voice or text, and the avatar responds with real hospital data — KPIs, queues, charts, surgeries, and more.
+
+https://github.com/user-attachments/assets/f69f5d26-2927-4450-8a76-e9617d83c3e9
+
+### How it works
+
+1. User opens the interface → animated **Orb** in `idle` state
+2. User speaks or types a clinical question → Orb switches to `listening`
+3. Frontend detects the workflow type via keywords
+4. Request is sent to the correct endpoint (`/workflow`, `/chat`, or `/dashboard`)
+5. Backend executes the appropriate **LangGraph** (Router → Clinical / Scoring / Conversational)
+6. Result is transformed and rendered on screen (`ResponseRenderer`)
+7. Text is sent to **OpenAI TTS** → audio is streamed to the **Simli avatar or Orb**
+8. Orb switches to `speaking` while the avatar "speaks" the response
+
+### Available Workflows
+
+| # | Workflow | Type | Description |
+|---|----------|------|-------------|
+| WF-01 | Chart summary | GPT-4o | Compiles complete patient history |
+| WF-02 | Evolution summarization | GPT-4o | Extracts essentials from clinical evolution notes |
+| WF-03 | Dashboard insights | GPT-4o | Analyzes KPIs and generates recommendations |
+| WF-04 | Queue prioritization | Algorithm | Classifies requests by risk and wait time |
+| WF-05 | Denial prediction | Algorithm | Calculates insurance denial probability |
+| WF-06 | No-show prediction | Algorithm | Estimates patient no-show chances |
+| WF-07 | Clinical documentation | GPT-4o | Generates reports, discharge summaries, progress notes |
+| WF-08 | Regulatory copilot | GPT-4o | Assists with authorization justifications |
+| WF-09 | Document review | Algorithm | Checks documentation completeness |
+| WF-10 | Surgical scheduling | Algorithm | Optimizes operating room allocation |
+| WF-11 | Bottleneck detection | Algorithm | Identifies overloaded units and rooms |
+| WF-12 | Conversational copilot | GPT-4o | Chat with memory about hospital data |
+| WF-13 | Post-discharge follow-up | GPT-4o | Monitors patients after discharge |
+| WF-14 | KPI monitoring | Algorithm | Calculates real-time indicators |
+| WF-16 | Voice dashboard | Orchestrator | Classifies intent, executes workflows, synthesizes |
+
+### Copilot Stack
+
+- **Avatar** — Simli (audio/video streaming with facial animation)
+- **Voice** — Web Speech API (speech recognition) + OpenAI TTS (synthesis)
+- **Orchestration** — LangGraph (Router Graph + StateGraph)
+- **LLM** — OpenAI GPT-4o with specialized prompts per clinical domain
+- **Conversational memory** — LangGraph checkpointer (SQLite / PostgreSQL)
+
+---
+
 ## Repositories
 
 ```
